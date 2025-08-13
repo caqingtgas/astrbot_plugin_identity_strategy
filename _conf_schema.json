@@ -1,0 +1,68 @@
+{
+  "enabled": {
+    "type": "bool",
+    "description": "启用插件",
+    "default": true
+  },
+  "debug_log": {
+    "type": "bool",
+    "description": "注入成功时打印一条日志（便于排查）",
+    "default": false
+  },
+  "default_strategy_key": {
+    "type": "string",
+    "description": "默认应对策略 key；为 \"__empty__\" 或留空表示不注入",
+    "default": "__empty__"
+  },
+  "strategies": {
+    "type": "list",
+    "description": "可添加多个应对策略。留空文本或 key=__empty__ 可作为“空白策略”。",
+    "default": [],
+    "items": {
+      "type": "object",
+      "items": {
+        "key": { "type": "string", "description": "唯一 key，如 friend_guard_1" },
+        "name": { "type": "string", "description": "策略名称" },
+        "enabled": { "type": "bool", "description": "启用该策略", "default": true },
+        "mode": { "type": "string", "description": "注入位置：prepend 或 append", "default": "prepend" },
+        "special_ids": {
+          "type": "list",
+          "description": "特殊 ID 列表（用户 UID/QQ 号/Telegram ID 等）",
+          "default": []
+        },
+        "message_for_special": {
+          "type": "text",
+          "description": "对“特殊 ID”注入的提示消息（允许留空）",
+          "default": ""
+        },
+        "message_for_others": {
+          "type": "text",
+          "description": "对“其他 ID”注入的提示消息（允许留空）",
+          "default": ""
+        }
+      }
+    }
+  },
+  "bindings": {
+    "type": "list",
+    "description": "把策略绑定到群聊或私聊。scope=group 用 group_id；scope=private 用 sender_id。platform 可留空。",
+    "default": [],
+    "items": {
+      "type": "object",
+      "items": {
+        "scope": { "type": "string", "description": "group / private / all", "default": "all" },
+        "platform": { "type": "string", "description": "可选，平台名（如 aiocqhttp / telegram）", "default": "" },
+        "target_ids": {
+          "type": "list",
+          "description": "目标 ID 列表；当 scope=all 时可留空表示全局",
+          "default": []
+        },
+        "strategy_key": {
+          "type": "string",
+          "description": "要应用的策略 key（__empty__ 表示不注入）",
+          "default": "__empty__"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,6 @@
+# /opt/AstrBot/data/plugins/astrbot_plugin_identity_strategy/metadata.yaml
+name: astrbot_plugin_identity_strategy
+desc: 为群聊/私聊注入指定的应对提示词（纯配置，无命令；支持特殊ID与空白策略）
+version: 1.0.0
+author: CaQing ＆ GPT-5 Pro
+repo: https://github.com/caqingtgas/astrbot_plugin_identity_strategy
