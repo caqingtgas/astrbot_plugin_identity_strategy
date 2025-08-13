@@ -1,4 +1,3 @@
-# /opt/AstrBot/data/plugins/astrbot_plugin_identity_strategy/main.py
 from __future__ import annotations
 import json
 from typing import Optional, Dict, List, Tuple, Any
@@ -9,26 +8,77 @@ from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.provider import ProviderRequest
 
 
+def _decode_json_obj_from_str(name: str, s: str, max_rounds: int = 2) -> Optional[Dict]:
+    """
+    尝试从字符串中解析出 JSON 对象（dict）。
+    兼容历史“字符串里套字符串”的配置：
+      - 直接是对象字符串: '{"a":1}'
+      - 被转义包了一层:   "{\"a\":1}"  或  "\"{\\\"a\\\":1}\""
+
+    解码策略（最多 max_rounds 轮）：
+      1) 先直接 json.loads(cur)。若得到 dict -> 返回；若得到 str -> 继续下一轮；
+      2) 若 #1 失败（JSONDecodeError），尝试把 cur 当作“被转义的 JSON 字符串”解一次：json.loads(f'"{cur}"')。
+         成功后若得到 str 则进入下一轮；若得到 dict 则返回。
+
+    失败则返回 None，并打印告警日志。
+    """
+    cur = (s or "").strip()
+    if not cur:
+        return None
+
+    for round_idx in range(1, max_rounds + 1):
+        # 情况1：直接尝试 JSON 解码
+        try:
+            obj = json.loads(cur)
+            if isinstance(obj, dict):
+                return obj
+            if isinstance(obj, str):
+                # 继续下一轮，处理“字符串内还是 JSON 文本”的情况
+                cur = obj.strip()
+                continue
+            logger.warning(
+                "[identity_guard] %s item is JSON but not object (type=%s): %r",
+                name, type(obj).__name__, obj
+            )
+            return None
+        except json.JSONDecodeError:
+            # 情况2：把当前字符串视为“被转义的 JSON 字符串”，先反转义再进入下一轮
+            try:
+                unescaped = json.loads(f'"{cur}"')
+            except json.JSONDecodeError as e:
+                logger.warning(
+                    "[identity_guard] %s item nested-parse failed at round=%d: %r (err=%s)",
+                    name, round_idx, cur[:200], e
+                )
+                return None
+
+            cur = (unescaped or "").strip()
+            if not cur:
+                return None
+
+    logger.warning(
+        "[identity_guard] %s item exceeded max nested decode rounds (%d): %r",
+        name, max_rounds, s[:200]
+    )
+    return None
+
+
 def _as_obj(name: str, item: Any) -> Optional[Dict]:
-    """将配置项从 str 尝试解析为 dict；不是合法 JSON 就丢弃并告警。"""
+    """将配置项解析为 dict；支持 dict 或字符串（字符串按上述兼容规则解析）。"""
     if isinstance(item, dict):
         return item
     if isinstance(item, str):
-        s = item.strip()
-        if not s:
-            return None
-        try:
-            obj = json.loads(s)
-            if isinstance(obj, dict):
-                return obj
-            logger.warning("[identity_guard] %s item is JSON but not object: %r", name, obj)
-        except Exception as e:
-            logger.warning("[identity_guard] %s item parse failed: %r, err=%s", name, s, e)
+        return _decode_json_obj_from_str(name, item, max_rounds=2)
+    logger.warning("[identity_guard] %s item not dict/str: %r", name, item)
     return None
 
 
 def _as_list_of_obj(name: str, value: Any) -> List[Dict]:
-    """把 list 里的每一项都转成 dict（兼容字符串 JSON）。"""
+    """
+    把 list 里的每一项都转成 dict。
+    - 允许每项是 dict 或“包含 JSON 对象的字符串”（含历史的转义层）
+    - 解析失败会记录 WARNING 日志，便于发现配置问题
+    """
     out: List[Dict] = []
     if not isinstance(value, list):
         return out
@@ -37,16 +87,6 @@ def _as_list_of_obj(name: str, value: Any) -> List[Dict]:
         if obj is not None:
             out.append(obj)
         else:
-            # 兼容用户把对象再次转成 JSON 字符串后又被 JSON 转义包了一层的情况
-            # e.g. "{\"scope\":\"group\",\"target_ids\":[\"123\"]}"
-            if isinstance(it, str):
-                try:
-                    obj2 = json.loads(json.loads(f'"{it}"'))
-                    if isinstance(obj2, dict):
-                        out.append(obj2)
-                        continue
-                except Exception:
-                    pass
             logger.warning("[identity_guard] invalid %s item ignored: %r", name, it)
     return out
 
