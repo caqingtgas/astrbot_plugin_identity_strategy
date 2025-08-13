@@ -113,65 +113,67 @@ class IdentityGuard(Star):
             self._enabled, len(self._strategies), len(self._bindings), self._default_key or "(none)"
         )
 
+    # ---------- 通用：事件属性获取器（消除 _get_* 重复逻辑） ----------
+    def _get_event_attr(
+        self,
+        event: AstrMessageEvent,
+        paths: List[Tuple[Optional[str], Optional[Tuple[str, ...]]]],
+    ) -> str:
+        """
+        通用事件属性获取器：
+        - paths: 列表项为 (method_name, attr_chain)
+          * method_name: 先检测 hasattr(event, method_name)，若存在则调用并返回非 None 值
+          * attr_chain: 依次 getattr(event, key)，取到非 None 值即返回
+        - 仅捕获 AttributeError / TypeError，避免压制其他异常
+        """
+        for method_name, attr_chain in paths:
+            # 方法路径
+            if method_name and hasattr(event, method_name):
+                try:
+                    v = getattr(event, method_name)()
+                    if v is not None:
+                        return str(v)
+                except (AttributeError, TypeError):
+                    pass
+            # 属性链路径
+            if attr_chain:
+                try:
+                    obj: Any = event
+                    for key in attr_chain:
+                        obj = getattr(obj, key)
+                    if obj is not None:
+                        return str(obj)
+                except (AttributeError, TypeError):
+                    pass
+        return ""
+
     # ---------- 取平台/会话ID（兼容不同版本字段） ----------
     def _get_platform(self, event: AstrMessageEvent) -> str:
-        for attr in ("get_platform_name",):
-            if hasattr(event, attr):
-                try:
-                    v = getattr(event, attr)()  # type: ignore
-                    if v:
-                        return str(v)
-                except Exception:
-                    pass
-        return str(getattr(event, "platform", "") or "")
+        return self._get_event_attr(
+            event,
+            [
+                ("get_platform_name", None),
+                (None, ("platform",)),  # 兼容旧字段
+            ],
+        )
 
     def _get_sender_id(self, event: AstrMessageEvent) -> str:
-        for path in [
-            ("get_sender_id", None),
-            (None, ("message_obj", "sender", "user_id")),
-        ]:
-            name, chain = path
-            if name and hasattr(event, name):
-                try:
-                    v = getattr(event, name)()
-                    if v is not None:
-                        return str(v)
-                except Exception:
-                    pass
-            if chain:
-                try:
-                    obj = event
-                    for key in chain:
-                        obj = getattr(obj, key)
-                    if obj is not None:
-                        return str(obj)
-                except Exception:
-                    pass
-        return ""
+        return self._get_event_attr(
+            event,
+            [
+                ("get_sender_id", None),
+                (None, ("message_obj", "sender", "user_id")),
+            ],
+        )
 
     def _get_group_id(self, event: AstrMessageEvent) -> str:
-        for path in [
-            ("get_group_id", None),
-            (None, ("message_obj", "group_id")),
-        ]:
-            name, chain = path
-            if name and hasattr(event, name):
-                try:
-                    v = getattr(event, name)()
-                    if v is not None:
-                        return str(v)
-                except Exception:
-                    pass
-            if chain:
-                try:
-                    obj = event
-                    for key in chain:
-                        obj = getattr(obj, key)
-                    if obj is not None:
-                        return str(obj)
-                except Exception:
-                    pass
-        return ""
+        return self._get_event_attr(
+            event,
+            [
+                ("get_group_id", None),
+                (None, ("message_obj", "group_id")),
+            ],
+        )
 
     # ---------- 选择绑定的策略 ----------
     def _match_binding(self, event: AstrMessageEvent) -> str:
@@ -194,7 +196,7 @@ class IdentityGuard(Star):
                     return b.get("strategy_key", "")
                 if scope == "all" and not ids:
                     return b.get("strategy_key", "")
-            except Exception as e:
+            except (KeyError, TypeError, AttributeError) as e:
                 logger.warning("[identity_guard] invalid binding %r: %s", b, e)
 
         return self._default_key
@@ -207,7 +209,7 @@ class IdentityGuard(Star):
             try:
                 if s.get("key") == key and s.get("enabled", True):
                     return s
-            except Exception as e:
+            except (KeyError, TypeError, AttributeError) as e:
                 logger.warning("[identity_guard] invalid strategy %r: %s", s, e)
         return None
 
@@ -246,5 +248,5 @@ class IdentityGuard(Star):
                     "[identity_guard] injected(%s) mode=%s platform=%s group=%s sender=%s key=%s",
                     which, mode, self._get_platform(event), self._get_group_id(event), sender_id, strategy_key
                 )
-        except Exception as e:
+        except (KeyError, TypeError, AttributeError) as e:
             logger.warning("[identity_guard] inject failed: %s", e)
